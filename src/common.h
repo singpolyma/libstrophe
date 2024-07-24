@@ -335,6 +335,8 @@ struct _xmpp_conn_t {
     xmpp_sockopt_callback sockopt_cb;
     xmpp_sm_callback sm_callback;
     void *sm_callback_ctx;
+    xmpp_fast_token_handler fast_token_handler;
+    void *fast_token_handler_userdata;
 };
 
 void conn_disconnect(xmpp_conn_t *conn);

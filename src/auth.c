@@ -364,6 +364,18 @@ _handle_sasl_result(xmpp_conn_t *conn, xmpp_stanza_t *stanza, void *userdata)
                       (char *)userdata);
 
         if (conn->sasl_support & SASL_MASK_SASL2) {
+            if (conn->fast_token_handler) {
+                xmpp_stanza_t *token = xmpp_stanza_get_child_by_name_and_ns(
+                    stanza, "token", XMPP_NS_FAST
+                );
+                if (token) {
+                    conn->fast_token_handler(
+                        conn,
+                        xmpp_stanza_get_attribute(token, "token"),
+                        conn->fast_token_handler_userdata
+                    );
+                }
+            }
             /* New features will come, but no restart */
             if (conn->compression.allowed) {
                 _handle_open_compress(conn);

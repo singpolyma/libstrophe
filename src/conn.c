@@ -624,6 +624,21 @@ void xmpp_conn_set_pass(xmpp_conn_t *conn, const char *pass)
     conn->pass = pass ? strophe_strdup(conn->ctx, pass) : NULL;
 }
 
+/** Set the fast token handler to receive new tokens from the server
+ *
+ *  @param conn a Strophe connection object
+ *  @param handler the handler
+ *  @param userdata data to pass to the handler
+ *
+ *  @ingroup Connections
+ */
+
+void xmpp_conn_set_fast_token_handler(xmpp_conn_t *conn, xmpp_fast_token_handler handler, void *userdata)
+{
+    conn->fast_token_handler = handler;
+    conn->fast_token_handler_userdata = userdata;
+}
+
 /** Get the user-agent id used for authentication of a connection.
  *
  *  @param conn a Strophe connection object
