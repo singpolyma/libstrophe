@@ -262,8 +262,9 @@ void compression_free(xmpp_conn_t *conn)
     }
 }
 
-void compression_handle_feature_children(xmpp_conn_t *conn, const char *text)
+void compression_handle_feature_children(xmpp_conn_t *conn, const char *text, void *userdata)
 {
+    UNUSED(userdata);
     if (strcasecmp(text, "zlib") == 0) {
         conn->compression.supported = 1;
     }
