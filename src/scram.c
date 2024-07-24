@@ -121,7 +121,7 @@ union common_hash_ctx {
     sha512_context sha512;
 };
 
-static void crypto_HMAC(const struct hash_alg *alg,
+void crypto_HMAC(const struct hash_alg *alg,
                         const uint8_t *key,
                         size_t key_len,
                         const uint8_t *text,
