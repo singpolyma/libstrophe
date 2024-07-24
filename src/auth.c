@@ -22,6 +22,7 @@
 #include "common.h"
 #include "sasl.h"
 #include "sha1.h"
+#include "sha256.h"
 
 #ifdef _MSC_VER
 #define strcasecmp _stricmp
@@ -481,6 +482,69 @@ static int _handle_digestmd5_rspauth(xmpp_conn_t *conn,
 
     return 1;
 }
+
+static int _handle_ht_challenge(xmpp_conn_t *conn,
+                                xmpp_stanza_t *stanza,
+                                void *userdata)
+{
+    const char *name = xmpp_stanza_get_name(stanza);
+    if (strcmp(name, "challenge") == 0) {
+        /* got unexpected reply, ht doesn't challenge */
+        strophe_error(conn->ctx, "xmpp",
+                      "Got unexpected reply to SASL HT authentication.");
+        goto err;
+    } else {
+        if (strcmp(name, "success") == 0 && conn->sasl_support & SASL_MASK_SASL2) {
+            uint8_t digest[SHA256_DIGEST_SIZE];
+            const uint8_t *token = (uint8_t*)conn->fast_token;
+            xmpp_stanza_t *ad = xmpp_stanza_get_child_by_name_and_ns(
+                                    stanza, "additional-data", XMPP_NS_SASL2);
+            if (!ad) {
+                strophe_error(conn->ctx, "xmpp",
+                      "Got unexpected reply to SASL HT authentication.");
+                goto err;
+            }
+            uint8_t response[41];
+            size_t binding_data_len;
+            const uint8_t *cbdata =
+                tls_get_channel_binding_data(conn->tls, &binding_data_len);
+            if (binding_data_len > 32) {
+                strophe_error(
+                    conn->ctx, "auth",
+                    "Channel binding data is too big");
+                goto err;
+            }
+            memcpy(response, "Responder", sizeof("Responder")-1); // No NUL terminator
+            memcpy(response+sizeof("Responder")-1, cbdata, binding_data_len);
+            crypto_HMAC(&scram_sha256,
+                        token,
+                        strlen(conn->fast_token),
+                        response,
+                        sizeof("Responder") - 1 + binding_data_len,
+                        digest);
+            char *text = xmpp_stanza_get_text(ad);
+            if (!text) goto err;
+            uint8_t *decoded;
+            size_t decoded_size;
+            xmpp_base64_decode_bin(conn->ctx, text, strlen(text), &decoded, &decoded_size);
+            if (sizeof(digest) != decoded_size || memcmp(digest, decoded, decoded_size)) {
+                strophe_free(conn->ctx, text);
+                strophe_free(conn->ctx, decoded);
+                strophe_error(conn->ctx, "xmpp",
+                    "Got unexpected reply to SASL HT authentication.");
+                goto err;
+            }
+            strophe_free(conn->ctx, text);
+            strophe_free(conn->ctx, decoded);
+        }
+        return _handle_sasl_result(conn, stanza, "HT-SHA-256-EXPR");
+    }
+    return 1;
+err:
+    xmpp_disconnect(conn);
+    return 0;
+}
+
 
 struct scram_user_data {
     xmpp_conn_t *conn;

@@ -36,6 +36,7 @@ struct hash_alg {
 
 extern const struct hash_alg *scram_algs[];
 extern const size_t scram_algs_num;
+extern const struct hash_alg scram_sha256;
 
 void SCRAM_ClientKey(const struct hash_alg *alg,
                      const uint8_t *password,
@@ -55,5 +56,12 @@ void SCRAM_ClientProof(const struct hash_alg *alg,
                        const uint8_t *ClientKey,
                        const uint8_t *ClientSignature,
                        uint8_t *proof);
+
+void crypto_HMAC(const struct hash_alg *alg,
+                        const uint8_t *key,
+                        size_t key_len,
+                        const uint8_t *text,
+                        size_t len,
+                        uint8_t *digest);
 
 #endif /* __LIBSTROPHE_SCRAM_H__ */
