@@ -328,6 +328,8 @@ struct _xmpp_conn_t {
     hash_t *id_handlers;
     xmpp_handlist_t *handlers;
     xmpp_sockopt_callback sockopt_cb;
+    xmpp_fast_token_handler fast_token_handler;
+    void *fast_token_handler_userdata;
 };
 
 void conn_disconnect(xmpp_conn_t *conn);
