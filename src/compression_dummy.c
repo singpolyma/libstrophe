@@ -29,8 +29,9 @@ void compression_free(xmpp_conn_t *conn)
     UNUSED(conn);
 }
 
-void compression_handle_feature_children(xmpp_conn_t *conn, const char *text)
+void compression_handle_feature_children(xmpp_conn_t *conn, const char *text, void *userdata)
 {
     UNUSED(text);
+    UNUSED(userdata);
     conn->compression.supported = 0;
 }

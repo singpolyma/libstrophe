@@ -212,11 +212,12 @@ static int _handle_missing_features(xmpp_conn_t *conn, void *userdata)
     return 0;
 }
 
-typedef void (*text_handler)(xmpp_conn_t *conn, const char *text);
+typedef void (*text_handler)(xmpp_conn_t *conn, const char *text, void *userdata);
 static void _foreach_child(xmpp_conn_t *conn,
                            xmpp_stanza_t *parent,
                            const char *name,
-                           text_handler hndl)
+                           text_handler hndl,
+                           void *userdata)
 {
     xmpp_stanza_t *children;
     for (children = xmpp_stanza_get_children(parent); children;
@@ -227,29 +228,32 @@ static void _foreach_child(xmpp_conn_t *conn,
             if (text == NULL)
                 continue;
 
-            hndl(conn, text);
+            hndl(conn, text, userdata);
 
             strophe_free(conn->ctx, text);
         }
     }
 }
 
-static void _handle_sasl_children(xmpp_conn_t *conn, const char *text)
+static void _handle_sasl_children(xmpp_conn_t *conn, const char *text, void *userdata)
 {
+    int *support = userdata;
     if (strcasecmp(text, "PLAIN") == 0) {
-        conn->sasl_support |= SASL_MASK_PLAIN;
+        *support |= SASL_MASK_PLAIN;
     } else if (strcasecmp(text, "EXTERNAL") == 0 &&
                (conn->tls_client_cert || conn->tls_client_key)) {
-        conn->sasl_support |= SASL_MASK_EXTERNAL;
+        *support |= SASL_MASK_EXTERNAL;
     } else if (strcasecmp(text, "DIGEST-MD5") == 0) {
-        conn->sasl_support |= SASL_MASK_DIGESTMD5;
+        *support |= SASL_MASK_DIGESTMD5;
     } else if (strcasecmp(text, "ANONYMOUS") == 0) {
-        conn->sasl_support |= SASL_MASK_ANONYMOUS;
+        *support |= SASL_MASK_ANONYMOUS;
+    } else if (strcasecmp(text, "HT-SHA-256-EXPR") == 0) {
+        *support |= SASL_MASK_HT_SHA_256_EXPR;
     } else {
         size_t n;
         for (n = 0; n < scram_algs_num; ++n) {
             if (strcasecmp(text, scram_algs[n]->scram_name) == 0) {
-                conn->sasl_support |= scram_algs[n]->mask;
+                *support |= scram_algs[n]->mask;
                 break;
             }
         }
@@ -284,13 +288,27 @@ _handle_features(xmpp_conn_t *conn, xmpp_stanza_t *stanza, void *userdata)
 
     if (child) {
         conn->sasl_support |= SASL_MASK_SASL2;
-        _foreach_child(conn, child, "mechanism", _handle_sasl_children);
+        _foreach_child(conn, child, "mechanism", _handle_sasl_children,
+                       &conn->sasl_support);
+
+
+        xmpp_stanza_t *inlin = xmpp_stanza_get_child_by_name_and_ns(child,
+            "inline", XMPP_NS_SASL2);
+        if (inlin) {
+            xmpp_stanza_t *fast = xmpp_stanza_get_child_by_name_and_ns(inlin,
+                "fast", XMPP_NS_FAST);
+            if (fast) {
+                _foreach_child(conn, fast, "mechanism", _handle_sasl_children,
+                               &conn->fast_support);
+            }
+        }
     } else {
         /* check for SASL */
         child = xmpp_stanza_get_child_by_name_and_ns(stanza, "mechanisms",
                                                      XMPP_NS_SASL);
         if (child) {
-            _foreach_child(conn, child, "mechanism", _handle_sasl_children);
+            _foreach_child(conn, child, "mechanism", _handle_sasl_children,
+                           &conn->sasl_support);
         }
     }
 
@@ -760,7 +778,8 @@ static xmpp_stanza_t *_make_starttls(xmpp_conn_t *conn)
 
 static xmpp_stanza_t *_make_sasl_auth(xmpp_conn_t *conn,
                                       const char *mechanism,
-                                      const char *initial_data)
+                                      const char *initial_data,
+                                      int fast_count)
 {
     xmpp_stanza_t *auth, *init, *user_agent;
     xmpp_stanza_t *inittxt = NULL;
@@ -842,6 +861,31 @@ static xmpp_stanza_t *_make_sasl_auth(xmpp_conn_t *conn,
                     xmpp_stanza_add_child_ex(user_agent, device, 0);
                 }
                 xmpp_stanza_add_child_ex(auth, user_agent, 0);
+            }
+            if (fast_count >= 0) {
+                char count_str[50];
+                size_t result = snprintf(count_str, sizeof(count_str), "%d", fast_count);
+                if (result > 0 && result < sizeof(count_str)) {
+                    xmpp_stanza_t *fast = xmpp_stanza_new(conn->ctx);
+                    if (!fast) {
+                        xmpp_stanza_release(auth);
+                        return NULL;
+                    }
+                    xmpp_stanza_set_name(fast, "fast");
+                    xmpp_stanza_set_ns(fast, XMPP_NS_FAST);
+                    xmpp_stanza_set_attribute(fast, "count", count_str);
+                    xmpp_stanza_add_child_ex(auth, fast, 0);
+                }
+            } else if (conn->fast_support & SASL_MASK_HT_SHA_256_EXPR) {
+                xmpp_stanza_t *request_token = xmpp_stanza_new(conn->ctx);
+                if (!request_token) {
+                    xmpp_stanza_release(auth);
+                    return NULL;
+                }
+                xmpp_stanza_set_name(request_token, "request-token");
+                xmpp_stanza_set_ns(request_token, XMPP_NS_FAST);
+                xmpp_stanza_set_attribute(request_token, "mechanism", "HT-SHA-256-EXPR");
+                xmpp_stanza_add_child_ex(auth, request_token, 0);
             }
         } else {
             xmpp_stanza_set_name(auth, "auth");
@@ -925,7 +969,7 @@ static void _auth(xmpp_conn_t *conn)
 
     if (anonjid && (conn->sasl_support & SASL_MASK_ANONYMOUS)) {
         /* some crap here */
-        auth = _make_sasl_auth(conn, "ANONYMOUS", NULL);
+        auth = _make_sasl_auth(conn, "ANONYMOUS", NULL, -1);
         if (!auth) {
             disconnect_mem_error(conn);
             return;
@@ -954,7 +998,7 @@ static void _auth(xmpp_conn_t *conn)
             }
         }
 
-        auth = _make_sasl_auth(conn, "EXTERNAL", str);
+        auth = _make_sasl_auth(conn, "EXTERNAL", str, -1);
         strophe_free(conn->ctx, str);
         if (!auth) {
             disconnect_mem_error(conn);
@@ -971,6 +1015,69 @@ static void _auth(xmpp_conn_t *conn)
         strophe_error(conn->ctx, "auth",
                       "No node in JID, and SASL ANONYMOUS unsupported.");
         xmpp_disconnect(conn);
+    } else if (conn->fast_token && xmpp_conn_is_secured(conn) && conn->fast_support & SASL_MASK_HT_SHA_256_EXPR) {
+        const char *binding_type;
+        size_t binding_type_len;
+        if (tls_init_channel_binding(conn->tls, &binding_type,
+                                     &binding_type_len)) {
+            return;
+        }
+        if (strcmp(binding_type, "tls-exporter")) {
+            strophe_error(
+                conn->ctx, "auth",
+                "Can't use FAST without tls-exporter");
+            return;
+        }
+
+        uint8_t init[41];
+        size_t binding_data_len;
+        const uint8_t *cbdata =
+            tls_get_channel_binding_data(conn->tls, &binding_data_len);
+        if (binding_data_len > 32) {
+            strophe_error(
+                conn->ctx, "auth",
+                "Channel binding data is too big");
+            return;
+        }
+        memcpy(init, "Initiator", sizeof("Initiator")-1); // No NUL terminator
+        memcpy(init+sizeof("Initiator")-1, cbdata, binding_data_len);
+
+        authid = _get_authid(conn);
+        if (!authid) {
+            disconnect_mem_error(conn);
+            return;
+        }
+
+        const uint8_t *token = (uint8_t*)conn->fast_token;
+        uint8_t *buf = strophe_alloc(conn->ctx,
+                                     strlen(authid) + 1 + SHA256_DIGEST_SIZE);
+        memcpy(buf, authid, strlen(authid) + 1); // Copy NUL terminator too
+        crypto_HMAC(&scram_sha256,
+                    token,
+                    strlen(conn->fast_token),
+                    init,
+                    sizeof("Initiator") - 1 + binding_data_len,
+                    buf + strlen(authid) + 1);
+
+        str = xmpp_base64_encode(conn->ctx,
+                                 buf,
+                                 strlen(authid) + 1 + SHA256_DIGEST_SIZE);
+
+        auth = _make_sasl_auth(conn, "HT-SHA-256-EXPR", str, conn->fast_count);
+        strophe_free(conn->ctx, str);
+        strophe_free(conn->ctx, buf);
+        strophe_free(conn->ctx, authid);
+        if (!auth) {
+            disconnect_mem_error(conn);
+            return;
+        }
+
+        handler_add(conn, _handle_ht_challenge, sasl_ns, NULL, NULL, NULL);
+
+        send_stanza(conn, auth, XMPP_QUEUE_STROPHE);
+
+        /* FAST was tried, unset flag */
+        conn->fast_support &= ~SASL_MASK_HT_SHA_256_EXPR;
     } else if (conn->pass == NULL) {
         strophe_error(
             conn->ctx, "auth",
@@ -1006,7 +1113,7 @@ static void _auth(xmpp_conn_t *conn)
             return;
         }
 
-        auth = _make_sasl_auth(conn, scram_ctx->alg->scram_name, str);
+        auth = _make_sasl_auth(conn, scram_ctx->alg->scram_name, str, -1);
         strophe_free(conn->ctx, str);
         if (!auth) {
             disconnect_mem_error(conn);
@@ -1021,7 +1128,7 @@ static void _auth(xmpp_conn_t *conn)
         /* SASL algorithm was tried, unset flag */
         conn->sasl_support &= ~scram_ctx->alg->mask;
     } else if (conn->sasl_support & SASL_MASK_DIGESTMD5) {
-        auth = _make_sasl_auth(conn, "DIGEST-MD5", NULL);
+        auth = _make_sasl_auth(conn, "DIGEST-MD5", NULL, -1);
         if (!auth) {
             disconnect_mem_error(conn);
             return;
@@ -1046,7 +1153,7 @@ static void _auth(xmpp_conn_t *conn)
             return;
         }
 
-        auth = _make_sasl_auth(conn, "PLAIN", str);
+        auth = _make_sasl_auth(conn, "PLAIN", str, -1);
         strophe_free(conn->ctx, str);
         strophe_free(conn->ctx, authid);
         if (!auth) {
@@ -1233,7 +1340,7 @@ static int _handle_features_compress(xmpp_conn_t *conn,
                                                  XMPP_NS_FEATURE_COMPRESSION);
     if (conn->compression.allowed && child) {
         _foreach_child(conn, child, "method",
-                       compression_handle_feature_children);
+                       compression_handle_feature_children, NULL);
     }
 
     if (conn->compression.supported) {

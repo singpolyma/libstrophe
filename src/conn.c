@@ -624,6 +624,24 @@ void xmpp_conn_set_pass(xmpp_conn_t *conn, const char *pass)
     conn->pass = pass ? strophe_strdup(conn->ctx, pass) : NULL;
 }
 
+/** Set the fast token and count used to authenticate the connection.
+ *  If any token was previously set, it will be discarded.  The function
+ *  will make a copy of the token string.
+ *
+ *  @param conn a Strophe connection object
+ *  @param token the FAST token
+ *  @param count the count of times this token has been tried
+ *
+ *  @ingroup Connections
+ */
+void xmpp_conn_set_fast(xmpp_conn_t *conn, const char *token, int count)
+{
+    if (conn->fast_token)
+        strophe_free(conn->ctx, conn->fast_token);
+    conn->fast_token = token ? strophe_strdup(conn->ctx, token) : NULL;
+    conn->fast_count = count;
+}
+
 /** Set the fast token handler to receive new tokens from the server
  *
  *  @param conn a Strophe connection object

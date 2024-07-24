@@ -233,7 +233,7 @@ int conn_int_nop(struct conn_interface *intf);
 
 int compression_init(xmpp_conn_t *conn);
 void compression_free(xmpp_conn_t *conn);
-void compression_handle_feature_children(xmpp_conn_t *conn, const char *text);
+void compression_handle_feature_children(xmpp_conn_t *conn, const char *text, void *userdata);
 
 struct _xmpp_conn_t {
     struct conn_interface intf;
@@ -267,6 +267,7 @@ struct _xmpp_conn_t {
     int tls_failed;   /* set when tls fails, so we don't try again */
     int sasl_support; /* if true, field is a bitfield of supported
                          mechanisms */
+    int fast_support;
     int auth_legacy_enabled;
     int secured; /* set when stream is secured with TLS */
     xmpp_certfail_handler certfail_handler;
@@ -294,6 +295,8 @@ struct _xmpp_conn_t {
     char *domain;
     char *jid;
     char *pass;
+    char *fast_token;
+    int fast_count;
     char *user_agent_id;
     char *user_agent_software;
     char *user_agent_device;

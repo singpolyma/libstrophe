@@ -407,6 +407,7 @@ unsigned int xmpp_conn_cert_xmppaddr_num(xmpp_conn_t *conn);
 char *xmpp_conn_cert_xmppaddr(xmpp_conn_t *conn, unsigned int n);
 const char *xmpp_conn_get_pass(const xmpp_conn_t *conn);
 void xmpp_conn_set_pass(xmpp_conn_t *conn, const char *pass);
+void xmpp_conn_set_fast(xmpp_conn_t *conn, const char *token, int count);
 typedef void (*xmpp_fast_token_handler)(xmpp_conn_t *conn, const char *token, void *userdata);
 void xmpp_conn_set_fast_token_handler(xmpp_conn_t *conn, xmpp_fast_token_handler handler, void *userdata);
 const char *xmpp_conn_get_user_agent_id(const xmpp_conn_t *conn);
