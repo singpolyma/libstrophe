@@ -50,6 +50,7 @@
 #include "common.h"
 #include "resolver.h"
 #include "util.h"
+#include <os/log.h>
 
 #ifndef va_copy
 #ifdef HAVE_VA_COPY
@@ -177,9 +178,10 @@ static void xmpp_default_logger(void *userdata,
                                 const char *area,
                                 const char *msg)
 {
+	os_log_t customLog = os_log_create("com.cheogram.app", "strophe");
     xmpp_log_level_t filter_level = *(xmpp_log_level_t *)userdata;
     if (level >= filter_level)
-        fprintf(stderr, "%s %s %s\n", area, _xmpp_log_level_name[level], msg);
+        os_log(customLog, "%s %s %s\n", area, _xmpp_log_level_name[level], msg);
 }
 
 static const xmpp_log_t _xmpp_default_loggers[] = {

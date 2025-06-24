@@ -954,7 +954,7 @@ void conn_established(xmpp_conn_t *conn)
            connection, but the event loop ignores user's handlers when
            conn->stream_negotiation_completed is not set. */
         conn->stream_negotiation_completed = 1;
-        conn->conn_handler(conn, XMPP_CONN_RAW_CONNECT, 0, NULL,
+        conn->conn_handler(conn, XMPP_CONN_RAW_CONNECT, 0, NULL, 0,
                            conn->userdata);
     } else {
         /* send stream init */
@@ -1059,7 +1059,7 @@ void conn_disconnect(xmpp_conn_t *conn)
 
     /* fire off connection handler */
     conn->conn_handler(conn, XMPP_CONN_DISCONNECT, conn->error,
-                       conn->stream_error, conn->userdata);
+                       conn->stream_error, 0, conn->userdata);
 }
 
 /* prepares a parser reset.  this is called from handlers. we can't
@@ -1533,8 +1533,9 @@ int xmpp_conn_restore_sm_state(xmpp_conn_t *conn,
     memset(conn->sm_state, 0, sizeof(*conn->sm_state));
     conn->sm_state->ctx = conn->ctx;
 
+    conn->sm_state->bound_jid = strophe_strdup(conn->ctx, conn->jid);
     conn->sm_state->sm_support = 1;
-    conn->sm_state->sm_enabled = 1;
+    conn->sm_state->sm_enabled = 0;
     conn->sm_state->can_resume = 1;
     conn->sm_state->resume = 1;
 
@@ -1548,7 +1549,7 @@ int xmpp_conn_restore_sm_state(xmpp_conn_t *conn,
         goto err_reload;
 
     size_t id_len;
-    ret = sm_load_string(&sm, &conn->sm_state->id, &id_len);
+    ret = sm_load_string(&sm, &conn->sm_state->previd, &id_len);
     if (ret)
         goto err_reload;
 
@@ -1592,22 +1593,15 @@ int xmpp_conn_restore_sm_state(xmpp_conn_t *conn,
         memset(item, 0, sizeof(*item));
 
         add_queue_back(&conn->sm_state->sm_queue, item);
-
         ret = sm_load_u32(&sm, 0x1a, &item->sm_h);
         if (ret)
             goto err_reload;
         ret = sm_load_string(&sm, &item->data, &item->len);
         if (ret)
             goto err_reload;
-        if (sm.state < sm.state_end) {
-            ret = sm_load_string(&sm, &item->id, NULL);
-            if (ret)
-                goto err_reload;
-        }
 
         item->owner = XMPP_QUEUE_USER;
     }
-
     assert(sm.state == sm.state_end);
 
     return XMPP_EOK;
@@ -1636,7 +1630,7 @@ static int sm_store_u32(unsigned char **next_,
 static size_t sm_state_serialize(xmpp_conn_t *conn, unsigned char **buf)
 {
     if (!conn->sm_state->sm_support || !conn->sm_state->sm_enabled ||
-        !conn->sm_state->can_resume) {
+        !conn->sm_state->can_resume || !conn->sm_state->id) {
         *buf = NULL;
         return 0;
     }
@@ -1648,7 +1642,6 @@ static size_t sm_state_serialize(xmpp_conn_t *conn, unsigned char **buf)
     while (peek) {
         sm_queue_len++;
         sm_queue_size += 10 + peek->len;
-        if (peek->id) sm_queue_size += 5 + strlen(peek->id);
         peek = peek->next;
     }
 
@@ -1658,7 +1651,6 @@ static size_t sm_state_serialize(xmpp_conn_t *conn, unsigned char **buf)
     while (peek) {
         send_queue_len++;
         send_queue_size += 5 + peek->len;
-        if (peek->id) send_queue_size += 5 + strlen(peek->id);
         peek = peek->next;
     }
 
@@ -1717,31 +1709,22 @@ static size_t sm_state_serialize(xmpp_conn_t *conn, unsigned char **buf)
             goto err_serialize;
         memcpy(next, peek->data, peek->len);
         next += peek->len;
-
-        if (peek->id) {
-            uint32_t len = strlen(peek->id);
-            if (sm_store_u32(&next, end, 0x7a, len))
-                goto err_serialize;
-            if (next + len > end)
-                goto err_serialize;
-            memcpy(next, peek->id, len);
-            next += len;
-        }
-
         peek = peek->next;
     }
+
+    assert(next == end);
 
     return buf_size;
 
 err_serialize:
     strophe_error(conn->ctx, "conn", "Can't serialize more data, buffer full");
-    strophe_free(conn->ctx, buf);
+    strophe_free(conn->ctx, *buf);
     return 0;
 }
 
 void trigger_sm_callback(xmpp_conn_t *conn)
 {
-    if (!conn || !conn->sm_callback)
+    if (!conn || !conn->sm_callback || !conn->sm_state->sm_enabled)
         return;
 
     unsigned char *buf;
@@ -1978,7 +1961,7 @@ char *xmpp_conn_send_queue_drop_element(xmpp_conn_t *conn,
     if (!t)
         return NULL;
 
-    if (conn->sm_ack_callback && t->id) {
+    if (conn->sm_ack_callback && t->id && !strncmp("<message", t->data, 8)) {
         conn->sm_ack_callback(conn, conn->sm_ack_callback_ctx, t->id);
     }
 
@@ -2257,7 +2240,7 @@ static void _conn_sm_handle_stanza(xmpp_conn_t *const conn,
                 e = pop_queue_front(&conn->sm_state->sm_queue);
                 strophe_debug_verbose(2, conn->ctx, "conn",
                                       "SM_Q_DROP: %p, h=%lu", e, e->sm_h);
-                if (conn->sm_ack_callback && e->id) {
+                if (conn->sm_ack_callback && e->id && !strncmp("<message", e->data, 8)) {
                     conn->sm_ack_callback(conn, conn->sm_ack_callback_ctx,
                                           e->id);
                 }
