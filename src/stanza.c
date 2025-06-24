@@ -25,6 +25,8 @@
 #include "hash.h"
 #include "parser.h"
 
+#include "os/log.h"
+
 /** Create a stanza object.
  *  This function allocates and initializes a blank stanza object.
  *  The stanza will have a reference count of one, so the caller does not

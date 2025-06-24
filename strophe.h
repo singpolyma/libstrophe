@@ -281,6 +281,7 @@ typedef void (*xmpp_conn_handler)(xmpp_conn_t *conn,
                                   xmpp_conn_event_t event,
                                   int error,
                                   xmpp_stream_error_t *stream_error,
+                                  int resumed,
                                   void *userdata);
 
 /** The Handler function which will be called when the TLS stack can't

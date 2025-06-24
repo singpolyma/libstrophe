@@ -292,6 +292,8 @@ int parser_reset(parser_t *parser)
 
     parser->xmlctx =
         xmlCreatePushParserCtxt(&parser->handlers, parser, NULL, 0, NULL);
+    if (parser->xmlctx)
+		xmlCtxtUseOptions(parser->xmlctx, XML_PARSE_NOENT | XML_PARSE_NONET);
 
     return parser->xmlctx ? 1 : 0;
 }

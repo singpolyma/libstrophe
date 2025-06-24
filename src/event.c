@@ -93,7 +93,7 @@ void xmpp_run_once(xmpp_ctx_t *ctx, unsigned long timeout)
     xmpp_connlist_t *connitem;
     xmpp_conn_t *conn;
     struct conn_interface *intf;
-    fd_set rfds, wfds;
+    fd_set rfds, wfds, efds;
     sock_t max = 0;
     int ret;
     struct timeval tv;
@@ -206,13 +206,13 @@ next_item:
 
     FD_ZERO(&rfds);
     FD_ZERO(&wfds);
+    FD_ZERO(&efds);
 
     /* find events to watch */
     connitem = ctx->connlist;
     while (connitem) {
         conn = connitem->conn;
         intf = &conn->intf;
-
         switch (conn->state) {
         case XMPP_STATE_CONNECTING:
             /* connect has been called and we're waiting for it to complete */
@@ -256,7 +256,7 @@ next_item:
 
     /* check for events */
     if (max > 0)
-        ret = select(max + 1, &rfds, &wfds, NULL, &tv);
+        ret = select(max + 1, &rfds, &wfds, &efds, &tv);
     else {
         if (timeout > 0)
             _sleep(timeout);
@@ -308,7 +308,6 @@ next_item:
             break;
         case XMPP_STATE_CONNECTED:
             if (FD_ISSET(conn->sock, &rfds) || intf->pending(intf)) {
-
                 ret = intf->read(intf, buf, STROPHE_MESSAGE_BUFFER_SIZE);
 
                 if (ret > 0) {

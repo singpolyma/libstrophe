@@ -313,8 +313,8 @@ _handle_features(xmpp_conn_t *conn, xmpp_stanza_t *stanza, void *userdata)
     }
 
     /* Disable PLAIN when other secure mechanisms are supported */
-    if (conn->sasl_support & ~(SASL_MASK_PLAIN | SASL_MASK_ANONYMOUS))
-        conn->sasl_support &= ~SASL_MASK_PLAIN;
+    //if (conn->sasl_support & ~(SASL_MASK_PLAIN | SASL_MASK_ANONYMOUS))
+    //    conn->sasl_support &= ~SASL_MASK_PLAIN;
 
     _auth(conn);
 
@@ -1177,12 +1177,12 @@ static void _auth(xmpp_conn_t *conn)
     }
 }
 
-static void _stream_negotiation_success(xmpp_conn_t *conn)
+static void _stream_negotiation_success(xmpp_conn_t *conn, int resumed)
 {
     tls_clear_password_cache(conn);
     conn->stream_negotiation_completed = 1;
     /* call connection handler */
-    conn->conn_handler(conn, XMPP_CONN_CONNECT, 0, NULL, conn->userdata);
+    conn->conn_handler(conn, XMPP_CONN_CONNECT, 0, NULL, resumed, conn->userdata);
 }
 
 /** Set up handlers at stream start.
@@ -1537,7 +1537,7 @@ _handle_bind(xmpp_conn_t *conn, xmpp_stanza_t *stanza, void *userdata)
          * successful
          */
         else {
-            _stream_negotiation_success(conn);
+            _stream_negotiation_success(conn, 0);
         }
     } else {
         strophe_error(conn->ctx, "xmpp", "Server sent malformed bind reply.");
@@ -1576,7 +1576,7 @@ _handle_session(xmpp_conn_t *conn, xmpp_stanza_t *stanza, void *userdata)
         if (conn->sm_state->sm_support && !conn->sm_disable) {
             _sm_enable(conn);
         } else {
-            _stream_negotiation_success(conn);
+            _stream_negotiation_success(conn, 0);
         }
     } else {
         strophe_error(conn->ctx, "xmpp",
@@ -1630,7 +1630,7 @@ static void _sm_queue_cleanup(xmpp_conn_t *conn, unsigned long ul_h, int failed)
         e = pop_queue_front(&conn->sm_state->sm_queue);
         if (failed && conn->sm_fail_callback && e->id) {
             conn->sm_fail_callback(conn, conn->sm_fail_callback_ctx, e->id);
-        } else if (conn->sm_ack_callback && e->id) {
+        } else if (conn->sm_ack_callback && e->id && !strncmp("<message", e->data, 8)) {
             conn->sm_ack_callback(conn, conn->sm_ack_callback_ctx, e->id);
         }
         strophe_free(conn->ctx, queue_element_free(conn->ctx, e));
@@ -1685,7 +1685,7 @@ static int _handle_sm(xmpp_conn_t *const conn,
          * still available.
          */
         _sm_queue_resend(conn);
-        _stream_negotiation_success(conn);
+        _stream_negotiation_success(conn, 0);
     } else if (strcmp(name, "resumed") == 0) {
         previd = xmpp_stanza_get_attribute(stanza, "previd");
         if (!previd || strcmp(previd, conn->sm_state->previd)) {
@@ -1711,7 +1711,7 @@ static int _handle_sm(xmpp_conn_t *const conn,
         _sm_queue_cleanup(conn, ul_h, 0);
         _sm_queue_resend(conn);
         strophe_debug(conn->ctx, "xmpp", "Session resumed successfully.");
-        _stream_negotiation_success(conn);
+        _stream_negotiation_success(conn, 1);
     } else if (strcmp(name, "failed") == 0) {
         name = NULL;
         conn->sm_state->sm_enabled = 0;
@@ -1809,7 +1809,7 @@ _handle_legacy(xmpp_conn_t *conn, xmpp_stanza_t *stanza, void *userdata)
         /* auth succeeded */
         strophe_debug(conn->ctx, "xmpp", "Legacy auth succeeded.");
 
-        _stream_negotiation_success(conn);
+        _stream_negotiation_success(conn, 0);
     } else {
         strophe_error(conn->ctx, "xmpp",
                       "Server sent us a legacy authentication "
@@ -1999,7 +1999,7 @@ int _handle_component_hs_response(xmpp_conn_t *conn,
         xmpp_disconnect(conn);
         return XMPP_EINT;
     } else {
-        _stream_negotiation_success(conn);
+        _stream_negotiation_success(conn, 0);
     }
 
     /* We don't need this handler anymore, return 0 so it can be deleted
@@ -2022,7 +2022,7 @@ void auth_handle_open_raw(xmpp_conn_t *conn)
 {
     handler_reset_timed(conn, 0);
     /* user handlers are not called before stream negotiation has completed. */
-    _stream_negotiation_success(conn);
+    _stream_negotiation_success(conn, 0);
 }
 
 void auth_handle_open_stub(xmpp_conn_t *conn)
