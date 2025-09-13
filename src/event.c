@@ -57,22 +57,19 @@
 #include "strophe.h"
 #include "common.h"
 #include "parser.h"
+#include "resolver.h"
 
 #ifndef STROPHE_MESSAGE_BUFFER_SIZE
 /** Max buffer size for receiving messages. */
 #define STROPHE_MESSAGE_BUFFER_SIZE 4096
 #endif
 
-static int _connect_next(xmpp_conn_t *conn)
+static void _connect_next(xmpp_conn_t *conn)
 {
     sock_close(conn->sock);
-    conn->sock = sock_connect(conn->xsock);
-    if (conn->sock == INVALID_SOCKET)
-        return -1;
-
+    conn->sock = INVALID_SOCKET;
     conn->timeout_stamp = time_stamp();
-
-    return 0;
+    sock_connect(conn->xsock);
 }
 
 /** Run the event loop once.
@@ -224,13 +221,9 @@ next_item:
                 FD_SET(conn->sock, &wfds);
             else {
                 strophe_info(ctx, "xmpp", "Connection attempt timed out.");
-                ret = _connect_next(conn);
-                if (ret != 0) {
-                    conn->error = ETIMEDOUT;
-                    conn_disconnect(conn);
-                } else {
+                _connect_next(conn);
+                if (conn->sock != INVALID_SOCKET)
                     FD_SET(conn->sock, &wfds);
-                }
             }
             break;
         case XMPP_STATE_CONNECTED:
@@ -254,6 +247,13 @@ next_item:
         connitem = connitem->next;
     }
 
+#ifdef HAVE_CARES
+    if (ares_chan) {
+        ares_fds(ares_chan, &rfds, &wfds);
+        ares_timeout(ares_chan, &tv, &tv);
+    }
+#endif
+
     /* check for events */
     if (max > 0)
         ret = select(max + 1, &rfds, &wfds, NULL, &tv);
@@ -275,6 +275,11 @@ next_item:
     if (ret == 0 && tls_read_bytes == 0)
         return;
 
+#ifdef HAVE_CARES
+    if (ares_chan)
+        ares_process(ares_chan, &rfds, &wfds);
+#endif
+
     /* process events */
     connitem = ctx->connlist;
     while (connitem) {
@@ -292,11 +297,7 @@ next_item:
                     /* connection failed */
                     strophe_debug(ctx, "xmpp", "connection failed, error %d",
                                   ret);
-                    ret = _connect_next(conn);
-                    if (ret != 0) {
-                        conn->error = ret;
-                        conn_disconnect(conn);
-                    }
+                    _connect_next(conn);
                     break;
                 }
 
